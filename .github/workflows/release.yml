@@ -1,0 +1,73 @@
+# Builds the plugin from the slop-chop monorepo at a pinned commit, gates the bundle on
+# version match, size, and the absence of Node module access, attests provenance for the
+# release assets, and publishes the GitHub release the Obsidian installer downloads from.
+name: release
+
+on:
+  push:
+    tags: ["*"]
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  # The slop-chop monorepo commit this release is built from. Bump per release.
+  ENGINE_REF: 17d50c1cc89afa68d68c6334342a22fe0cfbf245
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: dcadolph/slop-chop
+          ref: ${{ env.ENGINE_REF }}
+          path: engine-src
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine-src/go.mod
+      - name: Build the plugin bundle
+        run: make -C engine-src obsidian
+      - name: Gate the bundle
+        run: |
+          dist=engine-src/obsidian/dist
+          tag="${GITHUB_REF_NAME}"
+          built="$(jq -r .version "$dist/manifest.json")"
+          root="$(jq -r .version manifest.json)"
+          if [ "$tag" != "$built" ] || [ "$tag" != "$root" ]; then
+            echo "version mismatch: tag=$tag built=$built repo=$root" >&2
+            exit 1
+          fi
+          size="$(stat -c %s "$dist/main.js")"
+          echo "main.js is $size bytes"
+          if [ "$size" -ge 4500000 ]; then
+            echo "main.js too large for Obsidian Sync: $size bytes" >&2
+            exit 1
+          fi
+          if sed 's/require("obsidian")//g' "$dist/main.js" | grep -q 'require('; then
+            echo "bundle requires a Node module beyond the obsidian API" >&2
+            exit 1
+          fi
+          if grep -q 'eval(' "$dist/main.js"; then
+            echo "bundle contains eval" >&2
+            exit 1
+          fi
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            engine-src/obsidian/dist/main.js
+            engine-src/obsidian/dist/manifest.json
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            engine-src/obsidian/dist/main.js \
+            engine-src/obsidian/dist/manifest.json \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Built from dcadolph/slop-chop@${ENGINE_REF}. The engine ships inside main.js as gzipped WebAssembly and is decoded in memory: no filesystem access, no network. Assets carry build provenance attestations; verify with: gh attestation verify main.js --repo dcadolph/slop-chop-obsidian"
