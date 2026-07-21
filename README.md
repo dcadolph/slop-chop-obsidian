@@ -7,6 +7,8 @@ result every time.
 Part of [slop-chop](https://slop-chop.com). This repo holds the packaged plugin; the source
 lives in the [main repo](https://github.com/dcadolph/slop-chop/tree/main/obsidian).
 
+![slop-chop flags AI writing tells in an Obsidian note](screenshot-findings.png)
+
 ## Use
 
 - **Chop note** — the scissors ribbon icon, or the "slop-chop: Chop note" command, rewrites the
@@ -16,6 +18,8 @@ lives in the [main repo](https://github.com/dcadolph/slop-chop/tree/main/obsidia
   chop.
 
 Each chop shows the slop score before and after.
+
+![One command chops the note in place](screenshot-chop.png)
 
 ## Install
 
