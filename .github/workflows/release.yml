@@ -1,6 +1,12 @@
 # Builds the plugin from the slop-chop monorepo at a pinned commit, gates the bundle on
 # version match, size, and the absence of Node module access, attests provenance for the
 # release assets, and publishes the GitHub release the Obsidian installer downloads from.
+#
+# The pin lives in the ENGINE_REF file at the repo root, which the monorepo's release
+# workflow updates alongside main.js on every publish, so the rebuild here always uses
+# the same engine commit the release was cut from. The monorepo's committed manifest
+# does not carry the release version, so the built manifest is stamped from the tag
+# before the gate compares them.
 name: release
 
 on:
@@ -12,26 +18,28 @@ permissions:
   id-token: write
   attestations: write
 
-env:
-  # The slop-chop monorepo commit this release is built from. Bump per release.
-  ENGINE_REF: 17d50c1cc89afa68d68c6334342a22fe0cfbf245
-
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Read the engine pin
+        id: pin
+        run: echo "ref=$(tr -d '[:space:]' < ENGINE_REF)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           repository: dcadolph/slop-chop
-          ref: ${{ env.ENGINE_REF }}
+          ref: ${{ steps.pin.outputs.ref }}
           path: engine-src
           fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: engine-src/go.mod
       - name: Build the plugin bundle
-        run: make -C engine-src obsidian
+        run: |
+          jq --arg v "$GITHUB_REF_NAME" '.version = $v' engine-src/obsidian/manifest.json > m.tmp
+          mv m.tmp engine-src/obsidian/manifest.json
+          make -C engine-src obsidian
       - name: Gate the bundle
         run: |
           dist=engine-src/obsidian/dist
@@ -65,6 +73,7 @@ jobs:
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
+          ENGINE_REF: ${{ steps.pin.outputs.ref }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
             engine-src/obsidian/dist/main.js \
